@@ -34,4 +34,9 @@ USEMODULE += ps
 # include and auto-initialize all available sensors
 USEMODULE += saul_default
 
+EXTERNAL_MODULE_DIRS += $(RIOTPROJECT)/drivers/oss7_modem
+USEMODULE += oss7_modem
+
+INCLUDES += -I$(RIOTPROJECT)/drivers/oss7_modem/include
+
 include $(RIOTBASE)/Makefile.include
