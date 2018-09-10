@@ -20,7 +20,8 @@
 #define __MODEM_H__
 
 #include "d7ap.h"
-#include "hwuart.h"
+#include "periph/uart.h"
+
 
 // TODO for now we are assuming running on OSS-7, we can refactor later
 // so it is more portable
@@ -35,8 +36,8 @@ typedef struct {
     modem_write_file_data_callback_t write_file_data_callback;
 } modem_callbacks_t;
 
-void modem_init(uart_handle_t* uart_handle, modem_callbacks_t* callbacks);
-void modem_reinit();
+void modem_init(uart_t uart_handle, modem_callbacks_t* callbacks);
+void modem_reinit(void);
 bool modem_execute_raw_alp(uint8_t* alp, uint8_t len);
 bool modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size);
 bool modem_write_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data);
