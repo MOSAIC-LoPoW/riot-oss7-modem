@@ -33,7 +33,8 @@ int main(void)
     };
 
     modem_init(UART_DEV(1), &modem_callbacks);
-
+    modem_read_file(0, 0, 8);
+    
     char line_buf[SHELL_DEFAULT_BUFSIZE];
     shell_run(NULL, line_buf, SHELL_DEFAULT_BUFSIZE);
 
