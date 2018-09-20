@@ -33,6 +33,7 @@ USEMODULE += shell_commands
 USEMODULE += ps
 # include and auto-initialize all available sensors
 USEMODULE += saul_default
+USEMODULE += xtimer
 
 EXTERNAL_MODULE_DIRS += $(RIOTPROJECT)/drivers/oss7_modem
 USEMODULE += oss7_modem

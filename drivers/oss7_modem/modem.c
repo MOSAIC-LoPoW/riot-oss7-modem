@@ -32,12 +32,13 @@
 #include "d7ap.h"
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 //#include "platform.h"
 
 #define RX_BUFFER_SIZE 256
 #define CMD_BUFFER_SIZE 256
 #define OSS7MODEM_BAUDRATE 9600 // TODO
-
+#define CMD_TIMEOUT_MS 1000000
 #define DPRINT(...) printf(__VA_ARGS__)
 #define DPRINT_DATA(...)
 // #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
@@ -53,6 +54,8 @@ typedef struct {
   uint8_t tag_id;
   bool is_active;
   fifo_t fifo;
+  bool execute_synchronuous;
+  uint8_t* response_buffer; // used for sync responses
   uint8_t buffer[256];
 } command_t;
 
@@ -62,7 +65,7 @@ static fifo_t rx_fifo;
 static uint8_t rx_buffer[RX_BUFFER_SIZE];
 static char rx_thread_stack[THREAD_STACKSIZE_MAIN];
 static mutex_t rx_mutex = MUTEX_INIT_LOCKED;
-//static mutex_t cmd_mutex = MUTEX_INIT_LOCKED;
+static mutex_t cmd_mutex = MUTEX_INIT;
 
 static command_t command; // TODO only one active command supported for now
 static uint8_t next_tag_id = 0;
@@ -94,11 +97,15 @@ static void process_serial_frame(fifo_t* fifo) {
                                                action.file_data_operand.data);
         break;
       case ALP_OP_RETURN_FILE_DATA:
-        if(callbacks->return_file_data_callback)
+        if(command.execute_synchronuous) {
+          memcpy(command.response_buffer, action.file_data_operand.data, action.file_data_operand.provided_data_length);
+          mutex_unlock(&cmd_mutex);
+        } else if(callbacks->return_file_data_callback) {
           callbacks->return_file_data_callback(action.file_data_operand.file_offset.file_id,
                                                action.file_data_operand.file_offset.offset,
                                                action.file_data_operand.provided_data_length,
                                                action.file_data_operand.data);
+        }
         break;
       case ALP_OP_RETURN_STATUS: ;
         d7ap_session_result_t interface_status = *((d7ap_session_result_t*)action.status.data);
@@ -241,6 +248,7 @@ bool alloc_command(void) {
   }
 
   command.is_active = true;
+  command.execute_synchronuous = false;
   fifo_init(&command.fifo, command.buffer, CMD_BUFFER_SIZE);
   command.tag_id = next_tag_id;
   next_tag_id++;
@@ -249,7 +257,8 @@ bool alloc_command(void) {
   return true;
 }
 
-bool modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size) {
+// TODO can be removed later?
+bool modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size) {
   if(!alloc_command())
     return false;
 
@@ -260,7 +269,30 @@ bool modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size) {
   return true;
 }
 
-bool modem_write_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data) {
+bool modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* response_buffer) {
+  mutex_lock(&cmd_mutex); // block until locked
+  if(!alloc_command())
+    return false;
+
+  command.execute_synchronuous = true;
+  command.response_buffer = response_buffer;
+
+	alp_append_read_file_data_action(&command.fifo, file_id, offset, size, true, false);
+	send(command.buffer, fifo_get_size(&command.fifo));
+	
+  // try to lock again, should block until ready
+ 	int timeout = xtimer_mutex_lock_timeout(&cmd_mutex, CMD_TIMEOUT_MS); // TODO take timeout as param
+	if(!timeout) {
+		command.is_active = false;
+		return true;
+	} else {
+    return false;
+  }
+}
+
+
+// TODO can be removed later?
+bool modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data) {
   if(!alloc_command())
     return false;
 

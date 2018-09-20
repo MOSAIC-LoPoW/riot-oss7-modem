@@ -7,6 +7,7 @@
 
 #include "modem.h"
 
+
 void on_modem_command_completed_callback(bool with_error) 
 {
     printf("modem command completed (success = %i)", !with_error);
@@ -33,7 +34,10 @@ int main(void)
     };
 
     modem_init(UART_DEV(1), &modem_callbacks);
-    modem_read_file(0, 0, 8);
+    uint8_t uid[8];
+    modem_read_file(0, 0, 8, uid);
+    printf("modem UID: %02X%02X%02X%02X%02X%02X%02X%02X\n", 
+        uid[0], uid[1], uid[2], uid[3], uid[4], uid[5], uid[6], uid[7]);
     
     char line_buf[SHELL_DEFAULT_BUFSIZE];
     shell_run(NULL, line_buf, SHELL_DEFAULT_BUFSIZE);
