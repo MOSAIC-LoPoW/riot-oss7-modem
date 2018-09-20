@@ -19,6 +19,7 @@
 #include "xtimer.h"
 #include "thread.h"
 #include "mutex.h"
+#include "assert.h"
 
 #include "modem.h"
 #include "debug.h"
@@ -37,13 +38,15 @@
 #define CMD_BUFFER_SIZE 256
 #define OSS7MODEM_BAUDRATE 9600 // TODO
 
-#if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
-  #define DPRINT(...) log_print_string(__VA_ARGS__)
-  #define DPRINT_DATA(...) log_print_data(__VA_ARGS__)
-#else
-    #define DPRINT(...)
-    #define DPRINT_DATA(...)
-#endif
+#define DPRINT(...) printf(__VA_ARGS__)
+#define DPRINT_DATA(...)
+// #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
+//   #define DPRINT(...) log_print_string(__VA_ARGS__)
+//   #define DPRINT_DATA(...) log_print_data(__VA_ARGS__)
+// #else
+//     #define DPRINT(...)
+//     #define DPRINT_DATA(...)
+// #endif
 
 
 typedef struct {
@@ -79,7 +82,7 @@ static void process_serial_frame(fifo_t* fifo) {
           command_completed = action.tag_response.completed;
           completed_with_error = action.tag_response.error;
         } else {
-          DPRINT("received resp with unexpected tag_id (%i vs %i)", action.tag_response.tag_id, command.tag_id);
+          DPRINT("received resp with unexpected tag_id (%i vs %i)\n", action.tag_response.tag_id, command.tag_id);
           // TODO unsolicited responses
         }
         break;
@@ -101,7 +104,7 @@ static void process_serial_frame(fifo_t* fifo) {
         d7ap_session_result_t interface_status = *((d7ap_session_result_t*)action.status.data);
         //uint8_t addressee_len = 
         d7ap_addressee_id_length(interface_status.addressee.ctrl.id_type);
-        DPRINT("received resp from: ");
+        DPRINT("received resp from: \n");
         // TODO DPRINT_DATA(interface_status.addressee.id, addressee_len);
         // TODO callback?
         break;
@@ -112,7 +115,8 @@ static void process_serial_frame(fifo_t* fifo) {
 
 
   if(command_completed) {
-    DPRINT("command with tag %i completed @ %i", command.tag_id, timer_get_counter_value());
+    //DPRINT("command with tag %i completed @ %i", command.tag_id, timer_get_counter_value());
+    DPRINT("command with tag %i completed\n", command.tag_id);
     if(callbacks->command_completed_callback)
       callbacks->command_completed_callback(completed_with_error);
 
@@ -142,12 +146,12 @@ static void process_rx_fifo(void) {
         parsed_header = true;
         fifo_skip(&rx_fifo, SERIAL_ALP_FRAME_HEADER_SIZE);
         payload_len = header[2];
-        DPRINT("found header, payload size = %i", payload_len);
+        DPRINT("found header, payload size = %i\n", payload_len);
 		    mutex_unlock(&rx_mutex); // implicit return, task will re-run to parse payload
     }
   } else {
     if(fifo_get_size(&rx_fifo) < payload_len) {
-      DPRINT("payload not complete yet");
+      DPRINT("payload not complete yet\n");
       return;
     }
 
@@ -166,6 +170,7 @@ static void process_rx_fifo(void) {
 
 static void rx_cb(void * arg, uint8_t byte) {
   (void) arg; // keep compiler happy
+  (void) byte; // keep compiler happy
   fifo_put_byte(&rx_fifo, byte);
   
 	mutex_unlock(&rx_mutex); // start processing thread
@@ -184,7 +189,8 @@ static void send(uint8_t* buffer, uint8_t len) {
   platform_modem_release();
 #endif
 
-  DPRINT("> %i bytes @ %i", len, timer_get_counter_value());
+  //DPRINT("> %i bytes @ %i", len, timer_get_counter_value());
+  DPRINT("> %i bytes\n", len);
 }
 
 void* rx_thread(void* arg) {
@@ -207,9 +213,10 @@ void modem_init(uart_t uart, modem_callbacks_t* cbs) {
   fifo_init(&rx_fifo, rx_buffer, RX_BUFFER_SIZE);
 
 	thread_create(rx_thread_stack, sizeof(rx_thread_stack), THREAD_PRIORITY_MAIN -1, 
-		0 , rx_thread , NULL, "oss7_modem_rx");
+	 	0 , rx_thread , NULL, "oss7_modem_rx");
 	
-  uart_init(uart_handle, OSS7MODEM_BAUDRATE, rx_cb, NULL);
+  int ret = uart_init(uart_handle, OSS7MODEM_BAUDRATE, &rx_cb, NULL);
+  assert(ret == UART_OK);
   // TODO for now we keep uart enabled so we can use RX IRQ.
   // can be optimized later if GPIO IRQ lines are implemented.
   // assert(uart_enable(uart_handle));
@@ -228,7 +235,8 @@ bool modem_execute_raw_alp(uint8_t* alp, uint8_t len) {
 
 bool alloc_command(void) {
   if(command.is_active) {
-    DPRINT("prev command still active @ %i", timer_get_counter_value());
+    //DPRINT("prev command still active @ %i", timer_get_counter_value());
+    DPRINT("prev command still active\n");
     return false;
   }
 

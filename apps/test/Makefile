@@ -40,3 +40,5 @@ USEMODULE += oss7_modem
 INCLUDES += -I$(RIOTPROJECT)/drivers/oss7_modem/include
 
 include $(RIOTBASE)/Makefile.include
+
+CFLAGS += -DDEBUG_ASSERT_VERBOSE
