@@ -14,17 +14,17 @@
 
 void on_modem_command_completed_callback(bool with_error) 
 {
-    printf("modem command completed (success = %i)", !with_error);
+    printf("modem command completed (success = %i)\n", !with_error);
 }
 
 void on_modem_return_file_data_callback(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* output_buffer)
 {
-    printf("modem return file data file %i offset %li size %li buffer %p", file_id, offset, size, output_buffer);
+    printf("modem return file data file %i offset %li size %li buffer %p\n", file_id, offset, size, output_buffer);
 }
 
 void on_modem_write_file_data_callback(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* output_buffer)
 {
-    printf("modem write file data file %i offset %li size %li buffer %p", file_id, offset, size, output_buffer);
+    printf("modem write file data file %i offset %li size %li buffer %p\n", file_id, offset, size, output_buffer);
 }
 
 static d7ap_session_config_t session_config = {
@@ -58,6 +58,7 @@ int main(void)
     xtimer_ticks32_t last_wakeup = xtimer_now();
     uint8_t counter = 0;
     while(1) {
+        printf("Sending msg with counter %i\n", counter);
         modem_send_unsolicited_response(0x40, 0, 1, &counter, &session_config);
         counter++;
         xtimer_periodic_wakeup(&last_wakeup, INTERVAL);
