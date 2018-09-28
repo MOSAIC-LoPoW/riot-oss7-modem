@@ -38,7 +38,7 @@
 #define RX_BUFFER_SIZE 256
 #define CMD_BUFFER_SIZE 256
 #define OSS7MODEM_BAUDRATE 9600 // TODO
-#define CMD_TIMEOUT_MS 1000000
+#define CMD_TIMEOUT_MS 1000
 #define DPRINT(...) printf(__VA_ARGS__)
 #define DPRINT_DATA(...)
 // #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
@@ -99,7 +99,6 @@ static void process_serial_frame(fifo_t* fifo) {
       case ALP_OP_RETURN_FILE_DATA:
         if(command.execute_synchronuous) {
           memcpy(command.response_buffer, action.file_data_operand.data, action.file_data_operand.provided_data_length);
-          mutex_unlock(&cmd_mutex);
         } else if(callbacks->return_file_data_callback) {
           callbacks->return_file_data_callback(action.file_data_operand.file_offset.file_id,
                                                action.file_data_operand.file_offset.offset,
@@ -124,8 +123,12 @@ static void process_serial_frame(fifo_t* fifo) {
   if(command_completed) {
     //DPRINT("command with tag %i completed @ %i", command.tag_id, timer_get_counter_value());
     DPRINT("command with tag %i completed\n", command.tag_id);
-    if(callbacks->command_completed_callback)
-      callbacks->command_completed_callback(completed_with_error);
+    if(command.execute_synchronuous) {
+      mutex_unlock(&cmd_mutex);
+    } else {
+      if(callbacks->command_completed_callback)
+        callbacks->command_completed_callback(completed_with_error);
+    }
 
     command.is_active = false;
   }
@@ -257,15 +260,28 @@ bool alloc_command(void) {
   return true;
 }
 
+static bool block_until_cmd_completed(uint32_t timeout_ms) {
+  // try to lock again, should block until ready
+ 	int timeout = xtimer_mutex_lock_timeout(&cmd_mutex, timeout_ms); // TODO take timeout as param
+	if(!timeout) {
+		command.is_active = false;
+		return true;
+	} else {
+    return false;
+  }
+}
+
+static void send_read_file(uint8_t file_id, uint32_t offset, uint32_t size) {
+	alp_append_read_file_data_action(&command.fifo, file_id, offset, size, true, false);
+	send(command.buffer, fifo_get_size(&command.fifo));
+}
+
 // TODO can be removed later?
 bool modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size) {
   if(!alloc_command())
     return false;
 
-  alp_append_read_file_data_action(&command.fifo, file_id, offset, size, true, false);
-
-  send(command.buffer, fifo_get_size(&command.fifo));
-
+  send_read_file(file_id, offset, size);
   return true;
 }
 
@@ -277,17 +293,8 @@ bool modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* r
   command.execute_synchronuous = true;
   command.response_buffer = response_buffer;
 
-	alp_append_read_file_data_action(&command.fifo, file_id, offset, size, true, false);
-	send(command.buffer, fifo_get_size(&command.fifo));
-	
-  // try to lock again, should block until ready
- 	int timeout = xtimer_mutex_lock_timeout(&cmd_mutex, CMD_TIMEOUT_MS); // TODO take timeout as param
-	if(!timeout) {
-		command.is_active = false;
-		return true;
-	} else {
-    return false;
-  }
+	send_read_file(file_id, offset, size);
+  return block_until_cmd_completed(CMD_TIMEOUT_MS);
 }
 
 
@@ -303,15 +310,32 @@ bool modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uin
   return true;
 }
 
-bool modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
+static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
                                      d7ap_session_config_t* d7_interface_config) {
-  if(!alloc_command())
-    return false;
-
   alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)d7_interface_config, sizeof(d7ap_session_config_t));
   alp_append_return_file_data_action(&command.fifo, file_id, offset, length, data);
 
   send(command.buffer, fifo_get_size(&command.fifo));
+}
+
+bool modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
+                                     d7ap_session_config_t* d7_interface_config) {
+  mutex_lock(&cmd_mutex); // block until locked
+  if(!alloc_command())
+    return false;
+  
+  command.execute_synchronuous = true;
+
+  send_unsolicited_response(file_id, offset, length, data, d7_interface_config);
+  return block_until_cmd_completed(CMD_TIMEOUT_MS * 1000); // TODO take timeout as param
+}
+
+bool modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
+                                     d7ap_session_config_t* d7_interface_config) {
+  if(!alloc_command())
+    return false;
+
+  send_unsolicited_response(file_id, offset, length, data, d7_interface_config);
   return true;
 }
 

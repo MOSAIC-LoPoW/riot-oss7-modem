@@ -59,7 +59,16 @@ int main(void)
     uint8_t counter = 0;
     while(1) {
         printf("Sending msg with counter %i\n", counter);
-        modem_send_unsolicited_response(0x40, 0, 1, &counter, &session_config);
+        uint32_t start = xtimer_now_usec();
+
+        if(modem_send_unsolicited_response(0x40, 0, 1, &counter, &session_config)) {
+            uint32_t duration_usec = xtimer_now_usec() - start;
+            printf("Command completed successfully in %li ms\n", duration_usec / 1000);
+        } else {
+            printf("!!! modem communication failed or command timeout, reiniting\n"); // TODO distinguish
+            modem_reinit();
+        }
+
         counter++;
         xtimer_periodic_wakeup(&last_wakeup, INTERVAL);
         printf("slept until %" PRIu32 "\n", xtimer_usec_from_ticks(xtimer_now()));
