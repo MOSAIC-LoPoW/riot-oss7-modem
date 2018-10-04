@@ -6,6 +6,7 @@
 #include "shell_commands.h"
 #include "xtimer.h"
 //#include "timex.h"
+#include "errors.h"
 
 #include "modem.h"
 
@@ -61,12 +62,14 @@ int main(void)
         printf("Sending msg with counter %i\n", counter);
         uint32_t start = xtimer_now_usec();
 
-        if(modem_send_unsolicited_response(0x40, 0, 1, &counter, &session_config)) {
+        int rc = modem_send_unsolicited_response(0x40, 0, 1, &counter, &session_config);
+        if(rc == 0) {
             uint32_t duration_usec = xtimer_now_usec() - start;
             printf("Command completed successfully in %li ms\n", duration_usec / 1000);
-        } else {
-            printf("!!! modem communication failed or command timeout, reiniting\n"); // TODO distinguish
-            modem_reinit();
+        } else if(rc == -EBUSY) {
+            printf("Previous command still active, ignoring\n");
+        } else if(rc == -ETIMEDOUT) {
+            printf("Command timed out\n");
         }
 
         counter++;
