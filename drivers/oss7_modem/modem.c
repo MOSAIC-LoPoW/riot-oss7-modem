@@ -39,7 +39,7 @@
 #define RX_BUFFER_SIZE 256
 #define CMD_BUFFER_SIZE 256
 #define OSS7MODEM_BAUDRATE 9600 // TODO
-#define CMD_TIMEOUT_MS 1000 * 10
+#define CMD_TIMEOUT_MS 1000 * 30
 #define DPRINT(...) printf(__VA_ARGS__)
 #define DPRINT_DATA(...)
 // #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
@@ -261,7 +261,7 @@ bool alloc_command(void) {
   return true;
 }
 
-static bool block_until_cmd_completed(uint32_t timeout_ms) {
+static int block_until_cmd_completed(uint32_t timeout_ms) {
   // lock first and try to lock again with timeout, should block until ready, or timeout
   mutex_lock(&cmd_mutex);
   int timeout = xtimer_mutex_lock_timeout(&cmd_mutex, timeout_ms * 1000);
@@ -314,38 +314,60 @@ int modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint
 }
 
 static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     d7ap_session_config_t* d7_interface_config) {
-  alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)d7_interface_config, sizeof(d7ap_session_config_t));
+                                     alp_itf_id_t itf, void* interface_config) {
+  switch(itf) {
+    case ALP_ITF_ID_D7ASP:
+      alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)interface_config, sizeof(d7ap_session_config_t));
+      break;
+    case ALP_ITF_ID_LORAWAN:
+      alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN, (uint8_t *)interface_config, sizeof(lorawan_session_config_t));
+      break;
+    case ALP_ITF_ID_HOST:
+      break;
+    default:
+      assert(false);
+  }
+  
+  
   alp_append_return_file_data_action(&command.fifo, file_id, offset, length, data);
 
   send(command.buffer, fifo_get_size(&command.fifo));
 }
 
 int modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     d7ap_session_config_t* d7_interface_config) {
+                                     alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
     return -EBUSY;
   
   command.execute_synchronuous = true;
-  send_unsolicited_response(file_id, offset, length, data, d7_interface_config);
+  send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
   return block_until_cmd_completed(CMD_TIMEOUT_MS); // TODO take timeout as param
 }
 
 int modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     d7ap_session_config_t* d7_interface_config) {
+                                     alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
     return -EBUSY;
 
-  send_unsolicited_response(file_id, offset, length, data, d7_interface_config);
+  send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
   return 0;
 }
 
 bool modem_send_raw_unsolicited_response(uint8_t* alp_command, uint32_t length,
-                                         d7ap_session_config_t* d7_interface_config) {
+                                         alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
     return -EBUSY;
+  
+  switch(itf) {
+    case ALP_ITF_ID_D7ASP:
+      alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)interface_config, sizeof(d7ap_session_config_t));
+      break;
+    case ALP_ITF_ID_HOST:
+      break;
+    default:
+      assert(false);
+  }
 
-  alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)d7_interface_config, sizeof(d7ap_session_config_t));
   fifo_put(&command.fifo, alp_command, length);
 
   send(command.buffer, fifo_get_size(&command.fifo));

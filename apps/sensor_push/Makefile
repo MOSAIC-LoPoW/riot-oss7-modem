@@ -2,7 +2,7 @@
 APPLICATION = oss7modem-sensor-push
 
 # If no BOARD is found in the environment, use this default:
-BOARD ?= nucleo-l496zg
+BOARD ?= octa
 
 # This has to be the absolute path to the RIOT base directory:
 RIOTBASE ?= $(CURDIR)/../../../RIOT

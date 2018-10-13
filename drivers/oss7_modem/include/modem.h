@@ -20,6 +20,8 @@
 #define __MODEM_H__
 
 #include "d7ap.h"
+#include "alp.h"
+#include "lorawan_stack.h"
 #include "periph/uart.h"
 
 
@@ -43,8 +45,8 @@ int modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* re
 int modem_write_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data);
 int modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size);
 int modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data);
-int modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, d7ap_session_config_t* d7_interface_config);
-int modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, d7ap_session_config_t* d7_interface_config);
-int modem_send_raw_unsolicited_response_async(uint8_t* alp_command, uint32_t length, d7ap_session_config_t* d7_interface_config);
+int modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, alp_itf_id_t itf, void* interface_config);
+int modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, alp_itf_id_t itf, void* interface_config);
+int modem_send_raw_unsolicited_response_async(uint8_t* alp_command, uint32_t length, alp_itf_id_t itf, void* interface_config);
 
 #endif

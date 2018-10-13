@@ -1,8 +1,7 @@
 - Prepare the hardware:
-    - For serial terminal: mount a GPIO expander shield on P3 of the OCTA and attach an FTDI cable to GND, RX and TX pins
     - flash the modem app from OSS7 on the Murata modem OCTA shield. Use LRWAN1 platform for now, with following build options: `PLATFORM_CONSOLE_BAUDRATE:STRING=9600` and `PLATFORM_CONSOLE_UART:STRING=1`
-`
     - mount the Murata modem shield on P2
+    - attach a USB cable to the FTDI connector of the OCTA shield for the serial console
 - Firmware:
     - clone IDLAB fork of RIOT (forked until all changes are pushed upstream): `git clone https://github.com/MOSAIC-LoPoW/RIOT`
     - clone this repository: `git clone https://github.com/MOSAIC-LoPoW/riot-oss7-modem`
