@@ -16,10 +16,10 @@ An unsolicited message will be transmitted periodically using the DASH7 interfac
 
 #define INTERVAL (20U * US_PER_SEC)
 
-#define LORAWAN_NETW_SESSION_KEY  { 0x73, 0x30, 0xCE, 0x41, 0x6D, 0x6A, 0x30, 0x86, 0xFA, 0x40, 0x82, 0xBF, 0xAD, 0x62, 0x99, 0x10 }
-#define LORAWAN_APP_SESSION_KEY  { 0xC8, 0xF1, 0x95, 0xBA, 0x7A, 0xA5, 0x0F, 0x29, 0xC0, 0x76, 0x3A, 0x58, 0x40, 0xD5, 0xB3, 0x57 }
-#define LORAWAN_DEV_ADDR 0x26000850
-#define LORAWAN_NETW_ID 0x000017
+#define LORAWAN_NETW_SESSION_KEY  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+#define LORAWAN_APP_SESSION_KEY  { 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00 }
+#define LORAWAN_DEV_ADDR 0x00000000
+#define LORAWAN_NETW_ID 0x000000
 
 void on_modem_command_completed_callback(bool with_error) 
 {
@@ -83,7 +83,6 @@ int main(void)
     while(1) {
         printf("Sending msg with counter %i\n", counter);
         uint32_t start = xtimer_now_usec();
-        
         if(counter % 5 == 0) {
             if(current_interface_id == ALP_ITF_ID_D7ASP) {
                 printf("Switching to LoRaWAN\n");
@@ -96,13 +95,14 @@ int main(void)
             }
         }
 
-        int rc = modem_send_unsolicited_response(0x40, 0, 1, &counter, current_interface_id, current_interface_config);
-        if(rc == 0) {
-            uint32_t duration_usec = xtimer_now_usec() - start;
-            printf("Command completed successfully in %li ms\n", duration_usec / 1000);
-        } else if(rc == -EBUSY) {
-            printf("Previous command still active, ignoring\n");
-        } else if(rc == -ETIMEDOUT) {
+        modem_status_t status = modem_send_unsolicited_response(0x40, 0, 1, &counter, current_interface_id, current_interface_config);
+        uint32_t duration_usec = xtimer_now_usec() - start;
+        printf("Command completed in %li ms\n", duration_usec / 1000);
+        if(status == MODEM_STATUS_COMMAND_COMPLETED_SUCCESS) {
+            printf("Command completed successfully\n");
+        } else if(status == MODEM_STATUS_COMMAND_COMPLETED_ERROR) {
+            printf("Command completed with error\n");
+        } else if(status == MODEM_STATUS_COMMAND_TIMEOUT) {
             printf("Command timed out\n");
         }
 

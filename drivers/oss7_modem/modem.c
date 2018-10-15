@@ -54,6 +54,7 @@
 typedef struct {
   uint8_t tag_id;
   bool is_active;
+  bool completed_with_error;
   fifo_t fifo;
   bool execute_synchronuous;
   uint8_t* response_buffer; // used for sync responses
@@ -75,7 +76,6 @@ static uint8_t payload_len = 0;
 
 static void process_serial_frame(fifo_t* fifo) {
   bool command_completed = false;
-  bool completed_with_error = false;
   while(fifo_get_size(fifo)) {
     alp_action_t action;
     alp_parse_action(fifo, &action);
@@ -84,7 +84,7 @@ static void process_serial_frame(fifo_t* fifo) {
       case ALP_OP_RETURN_TAG:
         if(action.tag_response.tag_id == command.tag_id) {
           command_completed = action.tag_response.completed;
-          completed_with_error = action.tag_response.error;
+          command.completed_with_error = action.tag_response.error;
         } else {
           DPRINT("received resp with unexpected tag_id (%i vs %i)\n", action.tag_response.tag_id, command.tag_id);
           // TODO unsolicited responses
@@ -128,7 +128,7 @@ static void process_serial_frame(fifo_t* fifo) {
       mutex_unlock(&cmd_mutex);
     } else {
       if(callbacks->command_completed_callback)
-        callbacks->command_completed_callback(completed_with_error);
+        callbacks->command_completed_callback(command.completed_with_error);
     }
 
     command.is_active = false;
@@ -239,7 +239,7 @@ void modem_reinit(void) {
   command.is_active = false;
 }
 
-bool modem_execute_raw_alp(uint8_t* alp, uint8_t len) {
+modem_status_t modem_execute_raw_alp(uint8_t* alp, uint8_t len) {
   send(alp, len);
   return true; // TODO
 }
@@ -253,6 +253,7 @@ bool alloc_command(void) {
 
   command.is_active = true;
   command.execute_synchronuous = false;
+  command.completed_with_error = false;
   fifo_init(&command.fifo, command.buffer, CMD_BUFFER_SIZE);
   command.tag_id = next_tag_id;
   next_tag_id++;
@@ -261,17 +262,20 @@ bool alloc_command(void) {
   return true;
 }
 
-static int block_until_cmd_completed(uint32_t timeout_ms) {
+static modem_status_t block_until_cmd_completed(uint32_t timeout_ms) {
   // lock first and try to lock again with timeout, should block until ready, or timeout
   mutex_lock(&cmd_mutex);
   int timeout = xtimer_mutex_lock_timeout(&cmd_mutex, timeout_ms * 1000);
 	mutex_unlock(&cmd_mutex);
   if(!timeout) {
 		command.is_active = false;
-    return 0;
+    if(command.completed_with_error)
+      return MODEM_STATUS_COMMAND_COMPLETED_ERROR;
+    else
+      return MODEM_STATUS_COMMAND_COMPLETED_SUCCESS;
 	} else {
     DPRINT("!!! timeout, unlocking\n");
-    return -ETIMEDOUT;
+    return MODEM_STATUS_COMMAND_TIMEOUT;
   }
 }
 
@@ -281,17 +285,17 @@ static void send_read_file(uint8_t file_id, uint32_t offset, uint32_t size) {
 }
 
 // TODO can be removed later?
-int modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size) {
+modem_status_t modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
   
   send_read_file(file_id, offset, size);
-  return 0;
+  return MODEM_STATUS_COMMAND_PROCESSING;
 }
 
-int modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* response_buffer) {
+modem_status_t modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* response_buffer) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
     
   command.execute_synchronuous = true;  
   command.response_buffer = response_buffer;
@@ -302,15 +306,15 @@ int modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* re
 
 
 // TODO can be removed later?
-int modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data) {
+modem_status_t modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
 
   alp_append_write_file_data_action(&command.fifo, file_id, offset, size, data, true, false);
 
   send(command.buffer, fifo_get_size(&command.fifo));
 
-  return 0;
+  return MODEM_STATUS_COMMAND_PROCESSING;
 }
 
 static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
@@ -334,29 +338,29 @@ static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t
   send(command.buffer, fifo_get_size(&command.fifo));
 }
 
-int modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
+modem_status_t modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
                                      alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
   
   command.execute_synchronuous = true;
   send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
   return block_until_cmd_completed(CMD_TIMEOUT_MS); // TODO take timeout as param
 }
 
-int modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
+modem_status_t modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
                                      alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
 
   send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
-  return 0;
+  return MODEM_STATUS_COMMAND_PROCESSING;
 }
 
-bool modem_send_raw_unsolicited_response(uint8_t* alp_command, uint32_t length,
+modem_status_t modem_send_raw_unsolicited_response(uint8_t* alp_command, uint32_t length,
                                          alp_itf_id_t itf, void* interface_config) {
   if(!alloc_command())
-    return -EBUSY;
+    return MODEM_STATUS_BUSY;
   
   switch(itf) {
     case ALP_ITF_ID_D7ASP:
@@ -371,5 +375,5 @@ bool modem_send_raw_unsolicited_response(uint8_t* alp_command, uint32_t length,
   fifo_put(&command.fifo, alp_command, length);
 
   send(command.buffer, fifo_get_size(&command.fifo));
-  return 0;
+  return MODEM_STATUS_COMMAND_TIMEOUT;
 }
