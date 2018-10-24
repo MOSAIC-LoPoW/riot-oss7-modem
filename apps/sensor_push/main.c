@@ -57,7 +57,8 @@ static lorawan_session_config_t lorawan_session_config = {
     .appSKey = LORAWAN_APP_SESSION_KEY,
     .nwkSKey = LORAWAN_NETW_SESSION_KEY,
     .devAddr = LORAWAN_DEV_ADDR,
-    .request_ack = false
+    .request_ack = false,
+    .application_port = 1
 };
 
 int main(void)
