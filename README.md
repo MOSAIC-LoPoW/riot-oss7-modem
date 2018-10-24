@@ -1,6 +1,6 @@
 - Prepare the hardware:
-    - flash the modem app from OSS7 on the Murata modem OCTA shield. Use LRWAN1 platform for now, with following build options: `PLATFORM_CONSOLE_BAUDRATE:STRING=9600` and `PLATFORM_CONSOLE_UART:STRING=1`
-    - mount the Murata modem shield on P2
+    - flash the modem app from OSS7 on the Murata modem OCTA shield. Use LRWAN1 platform for now, with following build options: `PLATFORM_CONSOLE_BAUDRATE=9600` and `PLATFORM_CONSOLE_UART=1` and `MODULE_LORAWAN=y` if you want to use LoRaWAN.
+    - mount the Murata modem shield on P1
     - attach a USB cable to the FTDI connector of the OCTA shield for the serial console
 - Firmware:
     - clone IDLAB fork of RIOT (forked until all changes are pushed upstream): `git clone https://github.com/MOSAIC-LoPoW/RIOT`
