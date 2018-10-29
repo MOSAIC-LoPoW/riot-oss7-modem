@@ -323,8 +323,8 @@ static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t
     case ALP_ITF_ID_D7ASP:
       alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)interface_config, sizeof(d7ap_session_config_t));
       break;
-    case ALP_ITF_ID_LORAWAN:
-      alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN, (uint8_t *)interface_config, sizeof(lorawan_session_config_t));
+    case ALP_ITF_ID_LORAWAN_ABP:
+      alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN_ABP, (uint8_t *)interface_config, sizeof(lorawan_session_config_abp_t));
       break;
     case ALP_ITF_ID_HOST:
       break;

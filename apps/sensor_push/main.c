@@ -52,12 +52,12 @@ static d7ap_session_config_t d7_session_config = {
     },
 };
   
-static lorawan_session_config_t lorawan_session_config = {
-    .activationMethod = ABP,
+static lorawan_session_config_abp_t lorawan_session_config = {
     .appSKey = LORAWAN_APP_SESSION_KEY,
     .nwkSKey = LORAWAN_NETW_SESSION_KEY,
     .devAddr = LORAWAN_DEV_ADDR,
     .request_ack = false,
+    .network_id = LORAWAN_NETW_ID,
     .application_port = 1
 };
 
@@ -87,7 +87,7 @@ int main(void)
         if(counter % 5 == 0) {
             if(current_interface_id == ALP_ITF_ID_D7ASP) {
                 printf("Switching to LoRaWAN\n");
-                current_interface_id = ALP_ITF_ID_LORAWAN;
+                current_interface_id = ALP_ITF_ID_LORAWAN_ABP;
                 current_interface_config = &lorawan_session_config;
             } else {
                 printf("Switching to D7AP\n");
