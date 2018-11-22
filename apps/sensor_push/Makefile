@@ -34,6 +34,7 @@ USEMODULE += ps
 # include and auto-initialize all available sensors
 USEMODULE += saul_default
 USEMODULE += xtimer
+USEMODULE += periph_gpio_irq
 
 EXTERNAL_MODULE_DIRS += $(RIOTPROJECT)/drivers/oss7_modem
 USEMODULE += oss7_modem

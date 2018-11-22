@@ -40,6 +40,9 @@
 #define CMD_BUFFER_SIZE 256
 #define OSS7MODEM_BAUDRATE 9600 // TODO
 #define CMD_TIMEOUT_MS 1000 * 30
+#define MCU2MODEM_INTERRUPT_PIN GPIO_PIN(PORT_C, 9) // TODO take as init param?
+#define MODEM2MCU_INTERRUPT_PIN GPIO_PIN(PORT_F, 5) // TODO take as init param?
+
 #define DPRINT(...) printf(__VA_ARGS__)
 #define DPRINT_DATA(...)
 // #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
@@ -49,6 +52,8 @@
 //     #define DPRINT(...)
 //     #define DPRINT_DATA(...)
 // #endif
+
+#define USE_MODEM_INTERRUPT_LINES
 
 
 typedef struct {
@@ -73,6 +78,21 @@ static command_t command; // TODO only one active command supported for now
 static uint8_t next_tag_id = 0;
 static bool parsed_header = false;
 static uint8_t payload_len = 0;
+
+#ifdef USE_MODEM_INTERRUPT_LINES
+static void wakeup_modem(void) {
+  DPRINT("!!! modem wakeup\n");
+  gpio_set(MCU2MODEM_INTERRUPT_PIN);
+  xtimer_usleep(5000); // TODO
+  //modem_uart_on(); // TODO
+}
+
+static void release_modem(void) {
+  DPRINT("!!! modem release\n");
+  gpio_clear(MCU2MODEM_INTERRUPT_PIN);
+  //modem_uart_off();
+}
+#endif
 
 static void process_serial_frame(fifo_t* fifo) {
   bool command_completed = false;
@@ -188,16 +208,16 @@ static void rx_cb(void * arg, uint8_t byte) {
 }
 
 static void send(uint8_t* buffer, uint8_t len) {
-#ifdef PLATFORM_USE_MODEM_INTERRUPT_LINES
-  platform_modem_wakeup();
+#ifdef USE_MODEM_INTERRUPT_LINES
+  wakeup_modem();
 #endif
 
   uint8_t header[] = {'A', 'T', '$', 'D', 0xC0, 0x00, len };
   uart_write(uart_handle, header, sizeof(header));
   uart_write(uart_handle, buffer, len);
 
-#ifdef PLATFORM_USE_MODEM_INTERRUPT_LINES
-  platform_modem_release();
+#ifdef USE_MODEM_INTERRUPT_LINES
+  release_modem();
 #endif
 
   //DPRINT("> %i bytes @ %i", len, timer_get_counter_value());
@@ -218,6 +238,12 @@ void* rx_thread(void* arg) {
 	return NULL;
 }
 
+static void on_app_wakeup_requested(void* arg) {
+  (void) arg; // suppress warning
+  DPRINT("!!! wakeup requested by modem\n");
+  // TODO enable UART
+}
+
 void modem_init(uart_t uart, modem_callbacks_t* cbs) {
   uart_handle = uart;
   callbacks = cbs;
@@ -228,6 +254,12 @@ void modem_init(uart_t uart, modem_callbacks_t* cbs) {
 	
   int ret = uart_init(uart_handle, OSS7MODEM_BAUDRATE, &rx_cb, NULL);
   assert(ret == UART_OK);
+
+#ifdef USE_MODEM_INTERRUPT_LINES
+  gpio_init(MCU2MODEM_INTERRUPT_PIN, GPIO_OUT);
+  gpio_init_int(MODEM2MCU_INTERRUPT_PIN, GPIO_IN_PD, GPIO_RISING, &on_app_wakeup_requested, NULL);
+#endif
+
   // TODO for now we keep uart enabled so we can use RX IRQ.
   // can be optimized later if GPIO IRQ lines are implemented.
   // assert(uart_enable(uart_handle));
