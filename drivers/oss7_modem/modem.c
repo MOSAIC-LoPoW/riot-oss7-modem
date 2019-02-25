@@ -16,44 +16,27 @@
  * limitations under the License.
  */
 
-#include "xtimer.h"
-#include "thread.h"
-#include "mutex.h"
-#include "assert.h"
-#include "errors.h"
-
 #include "modem.h"
 #include "debug.h"
 #include "log.h"
+#include "errors.h"
 #include "fifo.h"
-
 #include "alp.h"
-//#include "scheduler.h"
-//#include "timer.h"
 #include "d7ap.h"
 #include <stdio.h>
 #include <stdlib.h>
-#include <string.h>
-//#include "platform.h"
+#include "modem_interface.h"
+#include "mutex.h"
+#include "xtimer.h"
+#include "string.h"
 
 #define RX_BUFFER_SIZE 256
 #define CMD_BUFFER_SIZE 256
-#define OSS7MODEM_BAUDRATE 9600 // TODO
+
 #define CMD_TIMEOUT_MS 1000 * 30
-#define MCU2MODEM_INTERRUPT_PIN GPIO_PIN(PORT_C, 9) // TODO take as init param?
-#define MODEM2MCU_INTERRUPT_PIN GPIO_PIN(PORT_F, 5) // TODO take as init param?
 
 #define DPRINT(...) printf(__VA_ARGS__)
 #define DPRINT_DATA(...)
-// #if defined(FRAMEWORK_LOG_ENABLED) && defined(FRAMEWORK_MODEM_LOG_ENABLED)
-//   #define DPRINT(...) log_print_string(__VA_ARGS__)
-//   #define DPRINT_DATA(...) log_print_data(__VA_ARGS__)
-// #else
-//     #define DPRINT(...)
-//     #define DPRINT_DATA(...)
-// #endif
-
-#define USE_MODEM_INTERRUPT_LINES
 
 
 typedef struct {
@@ -66,33 +49,10 @@ typedef struct {
   uint8_t buffer[256];
 } command_t;
 
-static uart_t uart_handle;
 static modem_callbacks_t* callbacks;
-static fifo_t rx_fifo;
-static uint8_t rx_buffer[RX_BUFFER_SIZE];
-static char rx_thread_stack[THREAD_STACKSIZE_MAIN];
-static mutex_t rx_mutex = MUTEX_INIT_LOCKED;
 static mutex_t cmd_mutex = MUTEX_INIT;
-
 static command_t command; // TODO only one active command supported for now
 static uint8_t next_tag_id = 0;
-static bool parsed_header = false;
-static uint8_t payload_len = 0;
-
-#ifdef USE_MODEM_INTERRUPT_LINES
-static void wakeup_modem(void) {
-  DPRINT("!!! modem wakeup\n");
-  gpio_set(MCU2MODEM_INTERRUPT_PIN);
-  xtimer_usleep(5000); // TODO
-  //modem_uart_on(); // TODO
-}
-
-static void release_modem(void) {
-  DPRINT("!!! modem release\n");
-  gpio_clear(MCU2MODEM_INTERRUPT_PIN);
-  //modem_uart_off();
-}
-#endif
 
 static void process_serial_frame(fifo_t* fifo) {
   bool command_completed = false;
@@ -129,9 +89,9 @@ static void process_serial_frame(fifo_t* fifo) {
         break;
       case ALP_OP_RETURN_STATUS: ;
         d7ap_session_result_t interface_status = *((d7ap_session_result_t*)action.status.data);
-        //uint8_t addressee_len = 
+        //uint8_t addressee_len =
         d7ap_addressee_id_length(interface_status.addressee.ctrl.id_type);
-        DPRINT("received resp from: \n");
+        DPRINT("received resp\n");
         // TODO DPRINT_DATA(interface_status.addressee.id, addressee_len);
         // TODO callback?
         break;
@@ -155,125 +115,28 @@ static void process_serial_frame(fifo_t* fifo) {
   }
 }
 
-static void process_rx_fifo(void) {
-  if(!parsed_header) {
-    // <sync byte (0xC0)><version (0x00)><length of ALP command (1 byte)><ALP command> // TODO CRC
-    if(fifo_get_size(&rx_fifo) > SERIAL_ALP_FRAME_HEADER_SIZE) {
-        uint8_t header[SERIAL_ALP_FRAME_HEADER_SIZE];
-        fifo_peek(&rx_fifo, header, 0, SERIAL_ALP_FRAME_HEADER_SIZE);
-        DPRINT_DATA(header, 3); // TODO tmp
-
-        if(header[0] != SERIAL_ALP_FRAME_SYNC_BYTE || header[1] != SERIAL_ALP_FRAME_VERSION) {
-          fifo_skip(&rx_fifo, 1);
-          DPRINT("skip");
-          parsed_header = false;
-          payload_len = 0;
-          if(fifo_get_size(&rx_fifo) < SERIAL_ALP_FRAME_HEADER_SIZE)
-            mutex_lock(&rx_mutex); // wait for more data
-
-          return;
-        }
-
-        parsed_header = true;
-        fifo_skip(&rx_fifo, SERIAL_ALP_FRAME_HEADER_SIZE);
-        payload_len = header[2];
-        DPRINT("found header, payload size = %i\n", payload_len);
-		    mutex_unlock(&rx_mutex); // implicit return, task will re-run to parse payload
-    }
-  } else {
-    if(fifo_get_size(&rx_fifo) < payload_len) {
-      //DPRINT("payload not complete yet\n");
-      return;
-    }
-
-    // payload complete, start parsing
-    // rx_fifo can be bigger than the current serial packet, init a subview fifo
-    // which is restricted to payload_len so we can't parse past this packet.
-    fifo_t payload_fifo;
-    fifo_init_subview(&payload_fifo, &rx_fifo, 0, payload_len);
-    process_serial_frame(&payload_fifo);
-
-    // pop parsed bytes from original fifo
-    fifo_skip(&rx_fifo, payload_len - fifo_get_size(&payload_fifo));
-    parsed_header = false;
-  }
+void modem_cb_init(modem_callbacks_t* cbs)
+{
+    callbacks = cbs;
 }
 
-static void rx_cb(void * arg, uint8_t byte) {
-  (void) arg; // keep compiler happy
-  (void) byte; // keep compiler happy
-  fifo_put_byte(&rx_fifo, byte);
-  
-	mutex_unlock(&rx_mutex); // start processing thread
-}
-
-static void send(uint8_t* buffer, uint8_t len) {
-#ifdef USE_MODEM_INTERRUPT_LINES
-  wakeup_modem();
-#endif
-
-  uint8_t header[] = {'A', 'T', '$', 'D', 0xC0, 0x00, len };
-  uart_write(uart_handle, header, sizeof(header));
-  uart_write(uart_handle, buffer, len);
-
-#ifdef USE_MODEM_INTERRUPT_LINES
-  release_modem();
-#endif
-
-  //DPRINT("> %i bytes @ %i", len, timer_get_counter_value());
-  DPRINT("> %i bytes\n", len);
-}
-
-void* rx_thread(void* arg) {
-	(void) arg; // supress warning
-	
-	while(true) {
-		// thread running forever, wait untill mutex available
-		// if unlocked --> there is data to process
-		mutex_lock(&rx_mutex);
-		
-		process_rx_fifo();
-	}
-	
-	return NULL;
-}
-
-static void on_app_wakeup_requested(void* arg) {
-  (void) arg; // suppress warning
-  DPRINT("!!! wakeup requested by modem\n");
-  // TODO enable UART
-}
-
-void modem_init(uart_t uart, modem_callbacks_t* cbs) {
-  uart_handle = uart;
-  callbacks = cbs;
-  fifo_init(&rx_fifo, rx_buffer, RX_BUFFER_SIZE);
-
-	thread_create(rx_thread_stack, sizeof(rx_thread_stack), THREAD_PRIORITY_MAIN -1, 
-	 	0 , rx_thread , NULL, "oss7_modem_rx");
-	
-  int ret = uart_init(uart_handle, OSS7MODEM_BAUDRATE, &rx_cb, NULL);
-  assert(ret == UART_OK);
-
-#ifdef USE_MODEM_INTERRUPT_LINES
-  gpio_init(MCU2MODEM_INTERRUPT_PIN, GPIO_OUT);
-  gpio_init_int(MODEM2MCU_INTERRUPT_PIN, GPIO_IN_PD, GPIO_RISING, &on_app_wakeup_requested, NULL);
-#endif
-
-  // TODO for now we keep uart enabled so we can use RX IRQ.
-  // can be optimized later if GPIO IRQ lines are implemented.
-  // assert(uart_enable(uart_handle));
-  // uart_set_rx_interrupt_callback(uart_handle, &rx_cb);
-  // assert(uart_rx_interrupt_enable(uart_handle) == SUCCESS);
+void modem_init(uint8_t uart_idx, uint32_t baudrate)
+{
+  modem_interface_init(uart_idx, baudrate, 0, 0); // TODO pins
+  modem_interface_register_handler(&process_serial_frame, SERIAL_MESSAGE_TYPE_ALP_DATA);
 }
 
 void modem_reinit(void) {
   command.is_active = false;
 }
 
-modem_status_t modem_execute_raw_alp(uint8_t* alp, uint8_t len) {
-  send(alp, len);
-  return true; // TODO
+void modem_send_ping(void) {
+  uint8_t ping_request[1]={0x01};
+  modem_interface_transfer_bytes((uint8_t*) &ping_request, 1, SERIAL_MESSAGE_TYPE_PING_REQUEST);
+}
+
+void modem_execute_raw_alp(uint8_t* alp, uint8_t len) {
+  modem_interface_transfer_bytes(alp, len, SERIAL_MESSAGE_TYPE_ALP_DATA);
 }
 
 bool alloc_command(void) {
@@ -313,14 +176,14 @@ static modem_status_t block_until_cmd_completed(uint32_t timeout_ms) {
 
 static void send_read_file(uint8_t file_id, uint32_t offset, uint32_t size) {
 	alp_append_read_file_data_action(&command.fifo, file_id, offset, size, true, false);
-	send(command.buffer, fifo_get_size(&command.fifo));
+  modem_interface_transfer_bytes(command.buffer, fifo_get_size(&command.fifo), SERIAL_MESSAGE_TYPE_ALP_DATA);
 }
 
 // TODO can be removed later?
 modem_status_t modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size) {
   if(!alloc_command())
     return MODEM_STATUS_BUSY;
-  
+
   send_read_file(file_id, offset, size);
   return MODEM_STATUS_COMMAND_PROCESSING;
 }
@@ -328,14 +191,13 @@ modem_status_t modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t 
 modem_status_t modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* response_buffer) {
   if(!alloc_command())
     return MODEM_STATUS_BUSY;
-    
-  command.execute_synchronuous = true;  
+
+  command.execute_synchronuous = true;
   command.response_buffer = response_buffer;
 
 	send_read_file(file_id, offset, size);
   return block_until_cmd_completed(CMD_TIMEOUT_MS);
 }
-
 
 // TODO can be removed later?
 modem_status_t modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data) {
@@ -344,68 +206,26 @@ modem_status_t modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t
 
   alp_append_write_file_data_action(&command.fifo, file_id, offset, size, data, true, false);
 
-  send(command.buffer, fifo_get_size(&command.fifo));
+  modem_interface_transfer_bytes(command.buffer, fifo_get_size(&command.fifo), SERIAL_MESSAGE_TYPE_ALP_DATA);
 
   return MODEM_STATUS_COMMAND_PROCESSING;
-}
-
-static void send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     alp_itf_id_t itf, void* interface_config) {
-  switch(itf) {
-    case ALP_ITF_ID_D7ASP:
-      alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)interface_config, sizeof(d7ap_session_config_t));
-      break;
-    case ALP_ITF_ID_LORAWAN_ABP:
-      alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN_ABP, (uint8_t *)interface_config, sizeof(lorawan_session_config_abp_t));
-      break;
-    case ALP_ITF_ID_HOST:
-      break;
-    default:
-      assert(false);
-  }
-  
-  
-  alp_append_return_file_data_action(&command.fifo, file_id, offset, length, data);
-
-  send(command.buffer, fifo_get_size(&command.fifo));
 }
 
 modem_status_t modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     alp_itf_id_t itf, void* interface_config) {
+                                     session_config_t* session_config) {
   if(!alloc_command())
     return MODEM_STATUS_BUSY;
-  
+
+  if(session_config->interface_type==DASH7)
+    alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *) &session_config->d7ap_session_config, sizeof(d7ap_session_config_t));
+  else if(session_config->interface_type==LORAWAN_OTAA)
+    alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN_OTAA, (uint8_t *) &session_config->lorawan_session_config_otaa, sizeof(lorawan_session_config_otaa_t));
+  else if(session_config->interface_type==lorawan_ABP)
+    alp_append_forward_action(&command.fifo, ALP_ITF_ID_LORAWAN_ABP, (uint8_t *) &session_config->lorawan_session_config_abp, sizeof(lorawan_session_config_abp_t));
+
+  alp_append_return_file_data_action(&command.fifo, file_id, offset, length, data);
+
   command.execute_synchronuous = true;
-  send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
+  modem_interface_transfer_bytes(command.buffer, fifo_get_size(&command.fifo), SERIAL_MESSAGE_TYPE_ALP_DATA);
   return block_until_cmd_completed(CMD_TIMEOUT_MS); // TODO take timeout as param
-}
-
-modem_status_t modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data,
-                                     alp_itf_id_t itf, void* interface_config) {
-  if(!alloc_command())
-    return MODEM_STATUS_BUSY;
-
-  send_unsolicited_response(file_id, offset, length, data, itf, interface_config);
-  return MODEM_STATUS_COMMAND_PROCESSING;
-}
-
-modem_status_t modem_send_raw_unsolicited_response(uint8_t* alp_command, uint32_t length,
-                                         alp_itf_id_t itf, void* interface_config) {
-  if(!alloc_command())
-    return MODEM_STATUS_BUSY;
-  
-  switch(itf) {
-    case ALP_ITF_ID_D7ASP:
-      alp_append_forward_action(&command.fifo, ALP_ITF_ID_D7ASP, (uint8_t *)interface_config, sizeof(d7ap_session_config_t));
-      break;
-    case ALP_ITF_ID_HOST:
-      break;
-    default:
-      assert(false);
-  }
-
-  fifo_put(&command.fifo, alp_command, length);
-
-  send(command.buffer, fifo_get_size(&command.fifo));
-  return MODEM_STATUS_COMMAND_TIMEOUT;
 }

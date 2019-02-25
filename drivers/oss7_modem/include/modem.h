@@ -46,14 +46,15 @@ typedef enum {
     MODEM_STATUS_COMMAND_PROCESSING
 } modem_status_t;
 
-void modem_init(uart_t uart_handle, modem_callbacks_t* callbacks);
+void modem_init(uint8_t uart_idx, uint32_t baudrate);
+void modem_cb_init(modem_callbacks_t* cbs);
 modem_status_t modem_read_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* response_buffer);
 modem_status_t modem_write_file(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data);
 modem_status_t modem_read_file_async(uint8_t file_id, uint32_t offset, uint32_t size);
 modem_status_t modem_write_file_async(uint8_t file_id, uint32_t offset, uint32_t size, uint8_t* data);
-modem_status_t modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, alp_itf_id_t itf, void* interface_config);
-modem_status_t modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, alp_itf_id_t itf, void* interface_config);
+modem_status_t modem_send_unsolicited_response(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, session_config_t* session_config);
+modem_status_t modem_send_unsolicited_response_async(uint8_t file_id, uint32_t offset, uint32_t length, uint8_t* data, session_config_t* session_config);
 modem_status_t modem_send_raw_unsolicited_response_async(uint8_t* alp_command, uint32_t length, alp_itf_id_t itf, void* interface_config);
-modem_status_t modem_execute_raw_alp(uint8_t* alp, uint8_t len);
+void modem_execute_raw_alp(uint8_t* alp, uint8_t len);
 
 #endif

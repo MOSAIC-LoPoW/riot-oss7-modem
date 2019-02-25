@@ -32,7 +32,8 @@
 
 #define DEFAULT_ACCESS_PROFILES_COUNT 3
 #define DEFAULT_ACCESS_CLASS 0x21
-#define FS_TRUSTED_NODE_TABLE_SIZE 10 // TODO
+
+#define FRAMEWORK_FS_TRUSTED_NODE_TABLE_SIZE 0 // TODO 0 for now
 
 typedef enum
 {
@@ -94,7 +95,7 @@ typedef struct {
 typedef struct {
     uint8_t filter_mode;
     uint8_t trusted_node_nb;
-    dae_nwl_trusted_node_t trusted_node_table[FS_TRUSTED_NODE_TABLE_SIZE];
+    dae_nwl_trusted_node_t trusted_node_table[FRAMEWORK_FS_TRUSTED_NODE_TABLE_SIZE];
 } dae_nwl_ssr_t;
 
 #endif /* DAE_H_ */
